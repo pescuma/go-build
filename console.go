@@ -46,10 +46,16 @@ func (r *Console) RunInline(args ...interface{}) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	tmp := make([]string, len(args))
+	for i, a := range args {
+		tmp[i] = fmt.Sprint(a)
+	}
+	fmt.Printf("Executing '%v'\n", strings.Join(tmp, "' '"))
+
 	return cmd.Run()
 }
 
-func (r *Console) OutputOf(args ...interface{}) (string, error) {
+func (r *Console) RunAndReturnOutput(args ...interface{}) (string, error) {
 	cmd, err := r.createCommand(args)
 	if err != nil {
 		return "", err
@@ -69,11 +75,10 @@ func (r *Console) OutputOf(args ...interface{}) (string, error) {
 func (r *Console) createCommand(args []interface{}) (*exec.Cmd, error) {
 	var err error
 	var env []string
-	var dir string
 	var name string
-	var sargs []string
+	var cargs []string
 
-	dir = r.Dir
+	dir := r.Dir
 
 	for i, a := range args {
 		s := fmt.Sprint(a)
@@ -92,11 +97,11 @@ func (r *Console) createCommand(args []interface{}) (*exec.Cmd, error) {
 			name = s
 
 		default:
-			sargs = append(sargs, s)
+			cargs = append(cargs, s)
 		}
 	}
 
-	cmd := exec.Command(name, sargs...)
+	cmd := exec.Command(name, cargs...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 

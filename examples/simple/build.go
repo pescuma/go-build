@@ -5,10 +5,13 @@ import (
 )
 
 func main() {
-	b, err := build.CreateBuilder(nil)
+	b, err := build.NewBuilder(nil)
 	if err != nil {
 		panic(err)
 	}
 
-	b.RunTarget("all")
+	err = b.RunTarget("all")
+	if err != nil {
+		panic(err)
+	}
 }

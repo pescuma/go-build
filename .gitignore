@@ -1,3 +1,6 @@
+# Build
+build/
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -17,14 +20,12 @@
 # Go workspace file
 go.work
 
-### Go Patch ###
+# Go Patch
 /vendor/
 /Godeps/
-
 
 # GoLand
 .idea/
 
-
-# Build
-build/
+# MacOS
+.DS_Store

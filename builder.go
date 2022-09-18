@@ -14,19 +14,58 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
-type BuilderConfig struct {
-	BaseDir string
+type Builder struct {
+	Code        CodeInfo
+	Git         GitInfo
+	Executables []ExecutableInfo
 
-	Archs []string
-	GCO   *bool
-	PIE   *bool
+	Targets       Targets
+	DefaultTarget string
+
+	Console *Console
+
+	GO         string
+	GO_VERSION *semver.Version
+	GO_GOOS    string
+	GO_GOARCH  string
+
+	GIT string
 }
 
-func CreateBuilder(cfg *BuilderConfig) (*Builder, error) {
+type CodeInfo struct {
+	BaseDir   string
+	Package   string
+	Version   *semver.Version
+	BuildDate time.Time
+
+	MinGoVersion *semver.Version
+}
+
+type ExecutableInfo struct {
+	Name    string
+	Path    string
+	Package string
+
+	Archs       []string
+	GCO         bool
+	BuildArgs   []string
+	LDFlags     []string
+	LDFlagsVars map[string]string
+
+	Publish bool
+}
+
+type GitInfo struct {
+	Tag        *semver.Version
+	Commit     string
+	CommitDate *time.Time
+}
+
+func NewBuilder(cfg *BuilderConfig) (*Builder, error) {
 	var err error
 
 	if cfg == nil {
-		cfg = &BuilderConfig{}
+		cfg = NewBuilderConfig()
 	}
 
 	if cfg.BaseDir == "" {
@@ -37,6 +76,7 @@ func CreateBuilder(cfg *BuilderConfig) (*Builder, error) {
 	}
 
 	b := &Builder{}
+	b.Targets.items = map[string]*Target{}
 
 	b.Console, err = CreateConsole(cfg.BaseDir)
 	if err != nil {
@@ -61,7 +101,13 @@ func CreateBuilder(cfg *BuilderConfig) (*Builder, error) {
 		b.Git.CommitDate = b.findGitCommitDate()
 	}
 
-	if err = b.initCodeInfo(cfg); err != nil {
+	err = b.initCodeInfo(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	err = b.createExecutables(cfg)
+	if err != nil {
 		return nil, err
 	}
 
@@ -70,49 +116,8 @@ func CreateBuilder(cfg *BuilderConfig) (*Builder, error) {
 	return b, nil
 }
 
-type Builder struct {
-	Code        CodeInfo
-	Git         GitInfo
-	Executables []ExecutableInfo
-
-	Targets TargetList
-
-	Console *Console
-
-	GO         string
-	GO_VERSION *semver.Version
-	GO_GOOS    string
-	GO_GOARCH  string
-
-	GIT string
-}
-
-type CodeInfo struct {
-	BaseDir   string
-	Package   string
-	Version   *semver.Version
-	BuildDate time.Time
-
-	MinGoVersion *semver.Version
-}
-
-type ExecutableInfo struct {
-	Name string
-	Path string
-
-	Archs []string
-	GCO   *bool
-	PIE   *bool
-}
-
-type GitInfo struct {
-	Tag        *semver.Version
-	Commit     string
-	CommitDate *time.Time
-}
-
 func (b *Builder) findGoVersion() (*semver.Version, string, string, error) {
-	goVersion, err := b.Console.OutputOf(b.GO, "version")
+	goVersion, err := b.Console.RunAndReturnOutput(b.GO, "version")
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -135,7 +140,7 @@ func (b *Builder) findGoVersion() (*semver.Version, string, string, error) {
 }
 
 func (b *Builder) findGitTag() *semver.Version {
-	tag, err := b.Console.OutputOf(b.GIT, "describe", "--tags", "--dirty")
+	tag, err := b.Console.RunAndReturnOutput(b.GIT, "describe", "--tags", "--dirty")
 	if err != nil {
 		return nil
 	}
@@ -149,12 +154,12 @@ func (b *Builder) findGitTag() *semver.Version {
 }
 
 func (b *Builder) findGitCommit() string {
-	result, _ := b.Console.OutputOf(b.GIT, "log", "-1", "--format=%H")
+	result, _ := b.Console.RunAndReturnOutput(b.GIT, "log", "-1", "--format=%H")
 	return result
 }
 
 func (b *Builder) findGitCommitDate() *time.Time {
-	date, err := b.Console.OutputOf(b.GIT, "log", "-1", "--format=%aI")
+	date, err := b.Console.RunAndReturnOutput(b.GIT, "log", "-1", "--format=%aI")
 	if err != nil {
 		return nil
 	}
@@ -168,6 +173,8 @@ func (b *Builder) findGitCommitDate() *time.Time {
 }
 
 func (b *Builder) initCodeInfo(cfg *BuilderConfig) error {
+	var err error
+
 	b.Code.BaseDir = cfg.BaseDir
 
 	modFile := filepath.Join(b.Code.BaseDir, "go.mod")
@@ -197,15 +204,41 @@ func (b *Builder) initCodeInfo(cfg *BuilderConfig) error {
 	if b.Git.Tag != nil {
 		b.Code.Version = b.Git.Tag
 	} else {
-		b.Code.Version, _ = semver.NewVersion("0.0.0-devel+" + b.Code.BuildDate.Format("200601021504"))
+		ver := "0.0.0-devel+"
+		if b.Git.Commit != "" {
+			ver += b.Git.Commit[:7] + "."
+		}
+		ver += b.Code.BuildDate.Format("20060102150405")
+
+		b.Code.Version, err = semver.NewVersion(ver)
+		if err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func (b *Builder) createExecutables(cfg *BuilderConfig) error {
 	archs, err := b.ListArchs(cfg.Archs...)
 	if err != nil {
 		return err
 	}
 
-	err = b.findRelativeDirsWithMain(b.Code.BaseDir, func(rel string) error {
+	var ldflags []string
+	if !cfg.PreserveSymbols {
+		ldflags = append(ldflags, "-s", "-w")
+	}
+
+	ldflagsVars := map[string]string{}
+	for k, v := range cfg.LDFlagsVars {
+		ldflagsVars[k] = v
+	}
+	ldflagsVars["main.version"] = b.Code.Version.String()
+	ldflagsVars["main.buildDate"] = b.Code.BuildDate.String()
+	ldflagsVars["main.commit"] = b.Git.Commit
+
+	err = b.findRelativeDirsWithMain(cfg, b.Code.BaseDir, func(path, rel string, publish bool) error {
 		var name string
 		if rel == "." {
 			name = filepath.Base(b.Code.Package)
@@ -213,13 +246,24 @@ func (b *Builder) initCodeInfo(cfg *BuilderConfig) error {
 			name = filepath.Base(rel)
 		}
 
-		b.Executables = append(b.Executables, ExecutableInfo{
-			Name:  name,
-			Path:  rel,
-			Archs: archs,
-			GCO:   cfg.GCO,
-			PIE:   cfg.PIE,
-		})
+		pkg := b.Code.Package
+		if rel != "." {
+			pkg += "/" + filepath.ToSlash(rel)
+		}
+
+		e := ExecutableInfo{
+			Name:        name,
+			Path:        path,
+			Package:     pkg,
+			Archs:       archs,
+			GCO:         cfg.GCO,
+			BuildArgs:   cfg.BuildArgs,
+			LDFlags:     ldflags,
+			LDFlagsVars: ldflagsVars,
+			Publish:     publish,
+		}
+
+		b.Executables = append(b.Executables, e)
 
 		return nil
 	})
@@ -228,7 +272,6 @@ func (b *Builder) initCodeInfo(cfg *BuilderConfig) error {
 	}
 
 	return nil
-
 }
 
 func (b *Builder) ListArchs(desired ...string) ([]string, error) {
@@ -263,11 +306,16 @@ func (b *Builder) ListArchs(desired ...string) ([]string, error) {
 	return result, nil
 }
 
-func (b *Builder) findRelativeDirsWithMain(baseDir string, cb func(string) error) error {
+func (b *Builder) findRelativeDirsWithMain(cfg *BuilderConfig, baseDir string, cb func(string, string, bool) error) error {
 	ignoredDirs := map[string]int{
 		"_examples": 0,
 		"examples":  0,
 		"internal":  0,
+	}
+
+	mainFiles := map[string]int{}
+	for _, e := range cfg.MainFileNames {
+		mainFiles[e] = 1
 	}
 
 	return filepath.WalkDir(baseDir,
@@ -277,24 +325,36 @@ func (b *Builder) findRelativeDirsWithMain(baseDir string, cb func(string) error
 			}
 
 			if dir.IsDir() {
-				_, ok := ignoredDirs[dir.Name()]
-				if ok || strings.HasPrefix(dir.Name(), ".") {
+				if strings.HasPrefix(dir.Name(), ".") {
 					return filepath.SkipDir
 				}
 
 				return nil
 			}
 
-			if dir.Name() != "main.go" {
+			_, hasMain := mainFiles[dir.Name()]
+			if !hasMain {
 				return nil
 			}
 
-			rel, err := filepath.Rel(baseDir, filepath.Dir(path))
+			abs := filepath.Dir(path)
+
+			rel, err := filepath.Rel(baseDir, abs)
 			if err != nil {
 				return err
 			}
 
-			err = cb(rel)
+			publish := true
+
+			for _, d := range strings.Split(filepath.ToSlash(rel), "/") {
+				_, ok := ignoredDirs[d]
+				if ok {
+					publish = false
+					break
+				}
+			}
+
+			err = cb(abs, rel, publish)
 			if err != nil {
 				return err
 			}
@@ -304,14 +364,14 @@ func (b *Builder) findRelativeDirsWithMain(baseDir string, cb func(string) error
 }
 
 func (b *Builder) listAvailableArchs() (map[string][]string, error) {
-	list, err := b.Console.OutputOf(b.GO, "tool", "dist", "list")
+	list, err := b.Console.RunAndReturnOutput(b.GO, "tool", "dist", "list")
 	if err != nil {
 		return nil, err
 	}
 
 	arr := strings.Split(list, "\n")
 
-	result := make(map[string][]string)
+	result := map[string][]string{}
 
 	add := func(k, v string) {
 		_, ok := result[k]
@@ -343,8 +403,12 @@ func (b *Builder) createDefaultTargets() {
 		for j, a := range e.Archs {
 			name := "build:" + e.Name + ":" + a
 			archTargets[j] = name
+
+			ee := e
+			aa := a
+
 			b.Targets.Add(name, nil, func() error {
-				return b.Console.RunInline(b.GO, "build", e.Path)
+				return b.RunBuild(ee, aa)
 			})
 		}
 
@@ -360,13 +424,6 @@ func (b *Builder) createDefaultTargets() {
 	})
 
 	b.Targets.Add("all", []string{"build", "test"}, nil)
-}
 
-func (b *Builder) RunTarget(name string) error {
-	t, ok := b.Targets.items[name]
-	if !ok {
-		return errors.Errorf("Unknown target: %v", name)
-	}
-
-	return t.run()
+	b.DefaultTarget = "all"
 }
