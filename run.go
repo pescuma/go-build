@@ -81,10 +81,35 @@ func (b *Builder) RunBuild(exec ExecutableInfo, arch string) error {
 	return b.Console.RunInline(cmd...)
 }
 
+func (b *Builder) RunCleanZip() error {
+	buildDir, err := filepath.Abs(filepath.Join(b.Code.BaseDir, "build"))
+	if err != nil {
+		return err
+	}
+
+	files, err := os.ReadDir(buildDir)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".zip") {
+			continue
+		}
+
+		err = os.Remove(filepath.Join(buildDir, file.Name()))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (b *Builder) RunZip(exec ExecutableInfo, arch string) error {
-	//if !exec.Publish {
-	//	return nil
-	//}
+	if !exec.Publish {
+		return nil
+	}
 
 	outputExec, err := b.GetOutputExecutableName(exec, arch)
 	if err != nil {

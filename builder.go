@@ -399,8 +399,12 @@ func (b *Builder) createDefaultTargets() {
 		return b.Console.RunInline(b.GO, "test", "./...")
 	})
 
+	b.Targets.Add("clean-zip", nil, func() error {
+		return b.RunCleanZip()
+	})
+
 	bt := b.Targets.Add("build", nil, nil)
-	zt := b.Targets.Add("zip", nil, nil)
+	zt := b.Targets.Add("zip", []string{"clean-zip"}, nil)
 
 	for _, exec := range b.Executables {
 		bet := b.Targets.Add(bt.Name+":"+exec.Name, nil, nil)
