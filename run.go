@@ -1,7 +1,10 @@
 package build
 
 import (
+	"archive/zip"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -45,11 +48,6 @@ func (b *Builder) RunBuild(exec ExecutableInfo, arch string) error {
 	goos := parts[0]
 	goarch := parts[1]
 
-	rel, err := filepath.Rel(b.Code.BaseDir, exec.Path)
-	if err != nil {
-		return err
-	}
-
 	var cmd []interface{}
 
 	cmd = append(cmd, "cd "+b.Code.BaseDir, "GOOS="+goos, "GOARCH="+goarch)
@@ -69,15 +67,11 @@ func (b *Builder) RunBuild(exec ExecutableInfo, arch string) error {
 		for k, v := range exec.LDFlagsVars {
 			ldflags = append(ldflags, "-X", fmt.Sprintf(`"%v=%v"`, k, v))
 		}
+
 		cmd = append(cmd, "-ldflags", strings.Join(ldflags, " "))
 	}
 
-	name := exec.Name
-	if goos == "windows" {
-		name += ".exe"
-	}
-
-	output, err := filepath.Abs(filepath.Join(b.Code.BaseDir, "build", goos, goarch, rel, name))
+	output, err := b.GetOutputExecutableName(exec, arch)
 	if err != nil {
 		return err
 	}
@@ -85,4 +79,85 @@ func (b *Builder) RunBuild(exec ExecutableInfo, arch string) error {
 	cmd = append(cmd, "-o", output, exec.Path)
 
 	return b.Console.RunInline(cmd...)
+}
+
+func (b *Builder) RunZip(exec ExecutableInfo, arch string) error {
+	//if !exec.Publish {
+	//	return nil
+	//}
+
+	outputExec, err := b.GetOutputExecutableName(exec, arch)
+	if err != nil {
+		return err
+	}
+
+	_, err = os.Stat(outputExec)
+	if err != nil {
+		return errors.Wrapf(err, "error accessing compiled executable %v", outputExec)
+	}
+
+	outputZip, err := b.GetOutputZipName(exec, arch)
+	if err != nil {
+		return err
+	}
+
+	_ = os.Remove(outputZip)
+
+	oz, err := os.Create(outputZip)
+	if err != nil {
+		return err
+	}
+	defer oz.Close()
+
+	oe, err := os.Create(outputExec)
+	if err != nil {
+		return err
+	}
+	defer oe.Close()
+
+	zw := zip.NewWriter(oz)
+	defer zw.Close()
+
+	ze, err := zw.Create(filepath.Base(outputExec))
+	if err != nil {
+		return err
+	}
+
+	_, err = io.Copy(ze, oe)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (b *Builder) GetOutputZipName(exec ExecutableInfo, arch string) (string, error) {
+	name := fmt.Sprintf("%v-%v-%v.zip", exec.Name, b.Code.Version, strings.ReplaceAll(arch, "/", "_"))
+	name = fixFilename(name)
+
+	output, err := filepath.Abs(filepath.Join(b.Code.BaseDir, "build", name))
+	if err != nil {
+		return "", err
+	}
+
+	return output, nil
+}
+
+func (b *Builder) GetOutputExecutableName(exec ExecutableInfo, arch string) (string, error) {
+	rel, err := filepath.Rel(b.Code.BaseDir, exec.Path)
+	if err != nil {
+		return "", err
+	}
+
+	name := exec.Name
+	if strings.HasPrefix(arch, "windows/") {
+		name += ".exe"
+	}
+
+	output, err := filepath.Abs(filepath.Join(b.Code.BaseDir, "build", arch, rel, name))
+	if err != nil {
+		return "", err
+	}
+
+	return output, nil
 }

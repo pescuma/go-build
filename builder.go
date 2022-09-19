@@ -395,35 +395,37 @@ func (b *Builder) createDefaultTargets() {
 		return b.Console.RunInline(b.GO, "generate", "./...")
 	})
 
-	execTargets := make([]string, len(b.Executables))
-
-	for i, e := range b.Executables {
-		archTargets := make([]string, len(e.Archs))
-
-		for j, a := range e.Archs {
-			name := "build:" + e.Name + ":" + a
-			archTargets[j] = name
-
-			ee := e
-			aa := a
-
-			b.Targets.Add(name, nil, func() error {
-				return b.RunBuild(ee, aa)
-			})
-		}
-
-		name := "build:" + e.Name
-		execTargets[i] = name
-		b.Targets.Add(name, archTargets, nil)
-	}
-
-	b.Targets.Add("build", execTargets, nil)
-
 	b.Targets.Add("test", nil, func() error {
-		return b.Console.RunInline(b.GO, "test")
+		return b.Console.RunInline(b.GO, "test", "./...")
 	})
 
-	b.Targets.Add("all", []string{"build", "test"}, nil)
+	bt := b.Targets.Add("build", nil, nil)
+	zt := b.Targets.Add("zip", nil, nil)
+
+	for _, exec := range b.Executables {
+		bet := b.Targets.Add(bt.Name+":"+exec.Name, nil, nil)
+		bt.AddDependency(bet)
+
+		zet := b.Targets.Add(zt.Name+":"+exec.Name, nil, nil)
+		zt.AddDependency(zet)
+
+		for _, arch := range exec.Archs {
+			ee := exec
+			aa := arch
+
+			beat := b.Targets.Add(bet.Name+":"+arch, nil, func() error {
+				return b.RunBuild(ee, aa)
+			})
+			bet.AddDependency(beat)
+
+			zeat := b.Targets.Add(zet.Name+":"+arch, []string{beat.Name}, func() error {
+				return b.RunZip(ee, aa)
+			})
+			zet.AddDependency(zeat)
+		}
+	}
+
+	b.Targets.Add("all", []string{"build", "test", "zip"}, nil)
 
 	b.DefaultTarget = "all"
 }
