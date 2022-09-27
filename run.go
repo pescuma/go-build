@@ -134,7 +134,7 @@ func (b *Builder) RunZip(exec ExecutableInfo, arch string) error {
 	}
 	defer oz.Close()
 
-	oe, err := os.Create(outputExec)
+	oe, err := os.Open(outputExec)
 	if err != nil {
 		return err
 	}
@@ -169,17 +169,12 @@ func (b *Builder) GetOutputZipName(exec ExecutableInfo, arch string) (string, er
 }
 
 func (b *Builder) GetOutputExecutableName(exec ExecutableInfo, arch string) (string, error) {
-	rel, err := filepath.Rel(b.Code.BaseDir, exec.Path)
-	if err != nil {
-		return "", err
-	}
-
 	name := exec.Name
 	if strings.HasPrefix(arch, "windows/") {
 		name += ".exe"
 	}
 
-	output, err := filepath.Abs(filepath.Join(b.Code.BaseDir, "build", arch, rel, name))
+	output, err := filepath.Abs(filepath.Join(b.Code.BaseDir, "build", arch, name))
 	if err != nil {
 		return "", err
 	}

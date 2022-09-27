@@ -85,7 +85,11 @@ func (r *Console) createCommand(args []interface{}) (*exec.Cmd, error) {
 
 		switch {
 		case i == 0 && strings.HasPrefix(s, "cd "):
-			dir, err = filepath.Rel(r.Dir, s[3:])
+			dir = s[3:]
+			if !filepath.IsAbs(dir) {
+				filepath.Join(r.Dir, s[3:])
+			}
+			dir, err = filepath.Abs(dir)
 			if err != nil {
 				return nil, err
 			}
