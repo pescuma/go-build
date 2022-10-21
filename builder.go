@@ -459,7 +459,7 @@ func (b *Builder) createDefaultTargets() {
 		}
 	}
 
-	b.Targets.Add("all", []string{"build", "test", "zip"}, nil)
+	b.Targets.Add("all", []string{"license-check", "build", "test", "zip"}, nil)
 
 	b.DefaultTarget = "all"
 }

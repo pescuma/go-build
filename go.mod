@@ -9,4 +9,13 @@ require (
 	golang.org/x/mod v0.5.1
 )
 
-require golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898 // indirect
+require (
+	github.com/aymanbagabas/go-osc52 v1.0.3 // indirect
+	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
+	github.com/mattn/go-isatty v0.0.16 // indirect
+	github.com/mattn/go-runewidth v0.0.14 // indirect
+	github.com/muesli/termenv v0.13.0 // indirect
+	github.com/rivo/uniseg v0.2.0 // indirect
+	golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab // indirect
+	golang.org/x/xerrors v0.0.0-20191011141410-1b5146add898 // indirect
+)

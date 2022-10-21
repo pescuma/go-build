@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/licensecheck"
+	"github.com/muesli/termenv"
 	"github.com/pkg/errors"
 )
 
@@ -186,6 +187,11 @@ func (b *Builder) GetOutputExecutableName(exec ExecutableInfo, arch string) (str
 }
 
 func (b *Builder) RunLicenseCheck() error {
+	if b.Code.License == "" {
+		fmt.Println("Can't run license check: unknown code license")
+		return nil
+	}
+
 	modCacheRoot, err := b.loadModCacheRoot()
 	if err != nil {
 		return err
@@ -207,11 +213,33 @@ func (b *Builder) RunLicenseCheck() error {
 		return deps[i].Path < deps[j].Path
 	})
 
+	output := termenv.NewOutput(os.Stdout)
+	withColor := func(text, color string) fmt.Stringer {
+		return output.String(text).Foreground(output.Color(color))
+	}
+
+	fmt.Printf("License: %v\n", withColor(b.Code.License, "2"))
+
+	incompatible := 0
+
 	for _, dep := range deps {
 		var names []string
+		compatible := false
+		known := false
 		for _, l := range dep.Licenses {
-			if l.Name != "" {
-				names = append(names, l.Name)
+			if l.Name == "" {
+				continue
+			}
+
+			names = append(names, l.Name)
+
+			switch {
+			case b.Code.License == l.Name:
+				compatible = true
+			case licensesCompatible[b.Code.License][l.Name]:
+				compatible = true
+			case licensesKnown[l.Name]:
+				known = true
 			}
 		}
 
@@ -220,7 +248,36 @@ func (b *Builder) RunLicenseCheck() error {
 			license = "Unknown"
 		}
 
-		fmt.Printf("%v %v : %v\n", dep.Path, dep.Version, license)
+		p := ""
+		color := ""
+
+		result := ""
+		switch {
+		case compatible:
+			p = "✓"
+			color = "2"
+			result = "compatible"
+
+		case known:
+			p = "✗"
+			color = "1"
+			result = "INCOMPATIBLE"
+			incompatible++
+
+		default:
+			p = "?"
+			color = "11"
+			result = "unknown"
+		}
+
+		fmt.Printf("%v %v %v : %v : %v\n",
+			withColor(p, color), dep.Path, dep.Version, withColor(license, color), result)
+	}
+
+	fmt.Println("This is not legal advice. For general information only. Based on https://dwheeler.com/essays/floss-license-slide.html")
+
+	if incompatible > 0 {
+		return errors.Errorf("%v dependencies with incompatible licenses", incompatible)
 	}
 
 	return nil
@@ -397,4 +454,163 @@ func addSeparatorAtEnd(dir string) string {
 	}
 
 	return dir
+}
+
+// https://dwheeler.com/essays/floss-license-slide.html
+var licensesKnown = map[string]bool{
+	"AGPL-3.0":          true,
+	"AGPL-3.0-only":     true,
+	"GPL-2.0":           true,
+	"GPL-2.0-only":      true,
+	"GPL-2.0-or-later":  true,
+	"GPL-3.0":           true,
+	"GPL-3.0-only":      true,
+	"GPL-3.0-or-later":  true,
+	"LGPL-3.0":          true,
+	"LGPL-3.0-only":     true,
+	"LGPL-3.0-or-later": true,
+	"LGPL-2.1":          true,
+	"LGPL-2.1-only":     true,
+	"LGPL-2.1-or-later": true,
+	"MPL-1.1":           true,
+	"Apache-2.0":        true,
+	"BSD-3-Clause":      true,
+	"MIT":               true,
+}
+var licensesCompatible = map[string]map[string]bool{
+	"BSD-3-Clause": {
+		"MIT": true,
+	},
+	"Apache-2.0": {
+		"BSD-3-Clause": true,
+		"MIT":          true,
+	},
+	"MPL-1.1": {
+		"BSD-3-Clause": true,
+		"MIT":          true,
+	},
+	"LGPL-2.1": {
+		"LGPL-2.1-only":     true,
+		"LGPL-2.1-or-later": true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"LGPL-2.1-only": {
+		"LGPL-2.1":          true,
+		"LGPL-2.1-or-later": true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"LGPL-2.1-or-later": {
+		"BSD-3-Clause": true,
+		"MIT":          true,
+	},
+	"LGPL-3.0": {
+		"LGPL-2.1-or-later": true,
+		"LGPL-3.0-only":     true,
+		"LGPL-3.0-or-later": true,
+		"Apache-2.0":        true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"LGPL-3.0-only": {
+		"LGPL-2.1-or-later": true,
+		"LGPL-3.0":          true,
+		"LGPL-3.0-or-later": true,
+		"Apache-2.0":        true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"LGPL-3.0-or-later": {
+		"LGPL-2.1-or-later": true,
+		"LGPL-3.0":          true,
+		"LGPL-3.0-only":     true,
+		"Apache-2.0":        true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"GPL-2.0": {
+		"GPL-2.0-only":      true,
+		"GPL-2.0-or-later":  true,
+		"GPL-2.0-or-3.0":    true,
+		"LGPL-2.1":          true,
+		"LGPL-2.1-only":     true,
+		"LGPL-2.1-or-later": true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"GPL-2.0-only": {
+		"GPL-2.0":           true,
+		"GPL-2.0-or-later":  true,
+		"GPL-2.0-or-3.0":    true,
+		"LGPL-2.1":          true,
+		"LGPL-2.1-only":     true,
+		"LGPL-2.1-or-later": true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"GPL-2.0-or-later": {
+		"LGPL-2.1":          true,
+		"LGPL-2.1-only":     true,
+		"LGPL-2.1-or-later": true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"GPL-3.0": {
+		"GPL-3.0-only":      true,
+		"GPL-3.0-or-later":  true,
+		"LGPL-2.1-or-later": true,
+		"LGPL-3.0":          true,
+		"LGPL-3.0-only":     true,
+		"LGPL-3.0-or-later": true,
+		"Apache-2.0":        true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"GPL-3.0-only": {
+		"GPL-3.0":           true,
+		"GPL-3.0-or-later":  true,
+		"LGPL-2.1-or-later": true,
+		"LGPL-3.0":          true,
+		"LGPL-3.0-only":     true,
+		"LGPL-3.0-or-later": true,
+		"Apache-2.0":        true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"GPL-3.0-or-later": {
+		"GPL-3.0":           true,
+		"GPL-3.0-only":      true,
+		"LGPL-2.1-or-later": true,
+		"LGPL-3.0":          true,
+		"LGPL-3.0-only":     true,
+		"LGPL-3.0-or-later": true,
+		"Apache-2.0":        true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"AGPL-3.0": {
+		"GPL-3.0":           true,
+		"GPL-3.0-only":      true,
+		"GPL-3.0-or-later":  true,
+		"LGPL-2.1-or-later": true,
+		"LGPL-3.0":          true,
+		"LGPL-3.0-only":     true,
+		"LGPL-3.0-or-later": true,
+		"Apache-2.0":        true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
+	"AGPL-3.0-only": {
+		"GPL-3.0":           true,
+		"GPL-3.0-only":      true,
+		"GPL-3.0-or-later":  true,
+		"LGPL-2.1-or-later": true,
+		"LGPL-3.0":          true,
+		"LGPL-3.0-only":     true,
+		"LGPL-3.0-or-later": true,
+		"Apache-2.0":        true,
+		"BSD-3-Clause":      true,
+		"MIT":               true,
+	},
 }
