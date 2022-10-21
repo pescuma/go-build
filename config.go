@@ -12,6 +12,13 @@ type BuilderConfig struct {
 	PreserveSymbols bool
 	BuildArgs       []string
 	LDFlagsVars     map[string]string
+
+	License      string
+	LicenseCheck struct {
+		Allowed     []string
+		Denied      []string
+		IgnoredDeps []string
+	}
 }
 
 func NewBuilderConfig() *BuilderConfig {

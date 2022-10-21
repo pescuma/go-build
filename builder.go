@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/google/licensecheck"
 	"github.com/pkg/errors"
 	"golang.org/x/mod/modfile"
 )
@@ -37,6 +38,7 @@ type CodeInfo struct {
 	Package   string
 	Version   *semver.Version
 	BuildDate time.Time
+	License   string
 
 	MinGoVersion *semver.Version
 }
@@ -216,6 +218,30 @@ func (b *Builder) initCodeInfo(cfg *BuilderConfig) error {
 		}
 	}
 
+	if cfg.License != "" {
+		b.Code.License = cfg.License
+
+	} else {
+		licenseFileNames, err := b.findLicenseFiles(b.Code.BaseDir)
+		if err != nil {
+			return err
+		}
+
+		if len(licenseFileNames) != 1 {
+			return errors.New("only one license supported")
+		}
+
+		data, err := os.ReadFile(licenseFileNames[0])
+		if err != nil {
+			return err
+		}
+
+		cov := licensecheck.Scan(data)
+		if cov.Percent >= 75 { // Same as pkg.go.dev
+			b.Code.License = cov.Match[0].ID
+		}
+	}
+
 	return nil
 }
 
@@ -391,6 +417,10 @@ func (b *Builder) listAvailableArchs() (map[string][]string, error) {
 }
 
 func (b *Builder) createDefaultTargets() {
+	b.Targets.Add("license-check", nil, func() error {
+		return b.RunLicenseCheck()
+	})
+
 	b.Targets.Add("generate", nil, func() error {
 		return b.Console.RunInline(b.GO, "generate", "./...")
 	})

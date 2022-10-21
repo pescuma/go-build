@@ -15,7 +15,7 @@ func main() {
 		panic(err)
 	}
 
-	err = b.RunTarget("all")
+	err = b.RunTarget("license-check")
 	if err != nil {
 		panic(err)
 	}
